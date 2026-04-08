@@ -119,7 +119,7 @@ Lmest_search_out <- lmestSearch(responsesFormula =  fmLatent$responsesFormula,
                    k = 1:5,
                    modBasic = 1, 
                    nrep = 20,
-                   maxit = 5000,
+                   maxit = 10000,
                   # fort = T,
                    seed = 12345)
 
@@ -227,25 +227,33 @@ lmestSearch_plot <- function(all_lks, k = 4, k_multiplier = 3, plot_hist = TRUE)
   df_filtered <- data.frame(diffs = filtered_diffs, type = "Filtered")
   
   if(plot_hist){
+    refinement_diff <- abs_best_lk - max_lk  # > 0 if refinement improved on best random start
+    refine_label <- sprintf("Red dashed: start=2 refinement LL=%.4f (%+.4f vs best random start)",
+                            abs_best_lk, refinement_diff)
+
     p1 <- ggplot(df_all, aes(x = diffs)) +
       geom_histogram(fill = "lightblue", color = "black", bins = 50) +
-      geom_vline(xintercept = abs_best_lk - max_lk, color = "red", linetype = "dashed") +
+      geom_vline(xintercept = 0,               color = "blue", linetype = "dashed") +
+      geom_vline(xintercept = refinement_diff, color = "red",  linetype = "dotted") +
       labs(title = paste0("Random starts log-lik diffs for k=", k),
-           x = "Log-likelihood difference from max",
+           x = "Log-likelihood difference from best random start",
            y = "Count",
-           caption = "Red dashed line: absolute best log-likelihood found (start=2 refinement run)") +
+           caption = paste0("Blue dashed: best random start (LL=", round(max_lk, 4), ").\n", refine_label)) +
       theme_minimal()
-    
+
     p2 <- ggplot(df_filtered, aes(x = diffs)) +
       geom_histogram(fill = "lightblue", color = "black", bins = 50) +
-      geom_vline(xintercept = abs_best_lk - max_lk, color = "red", linetype = "dashed") +
-      labs(title = paste0("Filtered log-lik diffs for k=", k, 
+      geom_vline(xintercept = 0,               color = "blue", linetype = "dashed") +
+      geom_vline(xintercept = refinement_diff, color = "red",  linetype = "dotted") +
+      coord_cartesian(xlim = range(filtered_diffs)) +
+      labs(title = paste0("Filtered log-lik diffs for k=", k,
                           " (tol = median + ", k_multiplier, "*MAD)"),
-           x = "Log-likelihood difference from max",
+           x = "Log-likelihood difference from best random start",
            y = "Count",
-           caption = paste0("Red dashed line: absolute best log-likelihood found (start=2 refinement run). \n Drop ratio: ", round(drop_ratio, 3))) +
+           caption = paste0("Blue dashed: best random start (LL=", round(max_lk, 4), ").\n",
+                            refine_label, "\nDrop ratio: ", round(drop_ratio, 3))) +
       theme_minimal()
-    
+
     grid.arrange(p1, p2, ncol = 1)
   }
   
@@ -279,7 +287,9 @@ cat("Median absolute diff near max for state 5:", abs(state5_llDiffs$median_diff
 
 ```
 
-The plots complement the output of lmestSearch() and allow to evaluate the stability of the estimate, they expose multimodality of the log-likelihood difference providing valuable insight on both the stability of the convergence at each k state, and the complexity of the parameter space.
+The plots complement the output of lmestSearch() and allow to evaluate the stability of the estimate, they expose multimodality of the log-likelihood surface and they provide valuable insight on both the stability of the convergence at each k state, and the complexity of the parameter space. 
+
+Blue and red dotted lines. The refinement run (start=2) re-runs the EM from the best random start's parameter that was found at convergence. This means that the refinement run can only improve using as starting point the best model found via random starts. A large difference between red (refinement fit ) and blue dashed lines (random start best fit) suggests either (a) maxit is too low and the random starts aren't converging fully, or (b) the random start happened to land near a good basin but more iterations were needed to climb it. Although finding no difference between refinement and random start does not represent a validation criterion, finding a large improvement between random and refinement run should flag our attention.
 
 
 
@@ -564,7 +574,7 @@ initial_States_summary<- initial_prob_Diagnostics(
    
  )
 initial_States_summary %>% 
-  arrange(Sep_Flag,varname,State) 
+  arrange(Sep_Flag,varname,State) %>% kable
  
 ```
 
@@ -837,7 +847,7 @@ A named list:
 | `$best_model`       | The `lmest` object with the highest LL across all replications. Identical interface to a single `lmest()` call. |
 | `$lks`              | Numeric vector of best LL per replication (length `n_reps`). |
 | `$all_lls`          | Numeric vector of per-start LLs extracted from `$lktrace` (requires `lmest()` to expose `$lktrace` — currently empty). |
-| `$all_diffs`        | `best_lk_all - all_lls`: LL gap of every random start from the global best (empty until `$lktrace` is available). |
+| `$all_diffs`        | `all_lls - best_lk_all`: LL difference of every random start from the best random start (≤ 0; consistent with `lmestSearch_plot()` convention). Empty until `$lktrace` is available. |
 | `$n_at_max`         | Number of workers whose best LL is within `stability_tol` of the global best. One value per worker — does not reflect all starts within each worker. |
 | `$n_at_max_all`     | Number of individual random starts within `stability_tol` of the global best LL (requires `$lktrace`). |
 | `$stability_pct`    | `n_at_max / n_reps × 100`: replication-level stability percentage. |
@@ -949,8 +959,8 @@ lmest_parallel <- function(
   }))
 
   best_lk_all  <- max(all_lls, na.rm = TRUE)
-  all_diffs    <- best_lk_all - all_lls
-  n_at_max_all <- sum(all_diffs <= stability_tol, na.rm = TRUE)
+  all_diffs    <- all_lls - best_lk_all        # <= 0: centered at best random start, consistent with lmestSearch_plot()
+  n_at_max_all <- sum(all_diffs >= -stability_tol, na.rm = TRUE)
 
   cat(sprintf("Stability (all starts):  %d / %d within %.0f LL units  (%.1f%%)\n",
               n_at_max_all, length(all_lls), stability_tol,
@@ -966,27 +976,28 @@ lmest_parallel <- function(
       ggplot2::geom_vline(xintercept = 0, linetype = "solid",
                           colour = "darkgreen", linewidth = 0.8)
 
-    # Only draw tolerance line when it falls within the data range — otherwise
-    # ggplot scales the x-axis out to stability_tol, compressing all bars left.
-    if (stability_tol < max(all_diffs, na.rm = TRUE))
+    # Only draw tolerance line when it falls within the data range (diffs <= 0;
+    # tolerance threshold is at -stability_tol). If all starts are within
+    # tolerance the line would fall outside the data range and distort the scale.
+    if (-stability_tol > min(all_diffs, na.rm = TRUE))
       p_hist <- p_hist +
-        ggplot2::geom_vline(xintercept = stability_tol, linetype = "dashed",
+        ggplot2::geom_vline(xintercept = -stability_tol, linetype = "dashed",
                             colour = "red")
 
     p_hist <- p_hist +
       ggplot2::labs(
-        title   = sprintf("LL differences from global best  (k = %d, %d workers, %d starts)",
+        title   = sprintf("LL differences from best random start  (k = %d, %d workers, %d starts)",
                           k, n_reps, length(all_lls)),
-        x       = "LL difference from global best (all random starts)",
+        x       = "LL difference from best random start (all random starts)",
         y       = "Count",
         caption = sprintf(
-          paste0("Green solid line: global best LL = %.4f.\n",
+          paste0("Green solid line: best random start LL = %.4f.\n",
                  "Stability tolerance: %.0f LL units",
                  "%s\n",
                  "Random starts only — deterministic and refinement starts",
                  " excluded via lktrace[2:(n-1)]."),
           best_lk_all, stability_tol,
-          if (stability_tol >= max(all_diffs, na.rm = TRUE))
+          if (-stability_tol <= min(all_diffs, na.rm = TRUE))
             " (all starts within tolerance — line omitted from plot)."
           else
             " (red dashed line).")
