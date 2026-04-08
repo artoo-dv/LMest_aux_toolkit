@@ -227,7 +227,10 @@ lmestSearch_plot <- function(all_lks, k = 4, k_multiplier = 3, plot_hist = TRUE)
   df_filtered <- data.frame(diffs = filtered_diffs, type = "Filtered")
   
   if(plot_hist){
-    refinement_diff <- abs_best_lk - max_lk  # > 0 if refinement improved on best random start
+    # start=2 uses the best run's *converged* parameters as initial values (not the
+    # original random seed), so refinement_diff > 0 means the EM travelled further
+    # from an already-converged solution — a large gap flags incomplete convergence.
+    refinement_diff <- abs_best_lk - max_lk
     refine_label <- sprintf("Red dashed: start=2 refinement LL=%.4f (%+.4f vs best random start)",
                             abs_best_lk, refinement_diff)
 
@@ -574,7 +577,7 @@ initial_States_summary<- initial_prob_Diagnostics(
    
  )
 initial_States_summary %>% 
-  arrange(Sep_Flag,varname,State) %>% kable
+  arrange(Sep_Flag,varname,State) 
  
 ```
 
@@ -948,14 +951,13 @@ lmest_parallel <- function(
                     n_reps - n_valid))
 
   # --- Aggregate per-start LLs from lktrace across all workers ---
-  # lktrace is a positional vector: [deterministic, random_1...random_n, refined]
-  # Trim first and last entries to keep only random starts,
-  # matching the same assumption made in lmestSearch_plot().
-  # NOTE: if LMest exposed lktrace as a named list this trim would not be needed.
+  # lmest() does not populate $lktrace — it is always NULL (lktrace is only
+  # set by lmestSearch()). This block is forward-looking: it will produce
+  # results once lmest exposes per-start LLs from lmcovlatent (and siblings).
   all_lls <- unlist(lapply(all_results, function(x) {
     tr <- x$model$lktrace
-    if (is.null(tr) || length(tr) <= 2) return(NULL)
-    tr[2:(length(tr) - 1)]
+    if (is.null(tr) || length(tr) == 0) return(NULL)
+    tr
   }))
 
   best_lk_all  <- max(all_lls, na.rm = TRUE)
@@ -992,10 +994,7 @@ lmest_parallel <- function(
         y       = "Count",
         caption = sprintf(
           paste0("Green solid line: best random start LL = %.4f.\n",
-                 "Stability tolerance: %.0f LL units",
-                 "%s\n",
-                 "Random starts only — deterministic and refinement starts",
-                 " excluded via lktrace[2:(n-1)]."),
+                 "Stability tolerance: %.0f LL units%s"),
           best_lk_all, stability_tol,
           if (-stability_tol <= min(all_diffs, na.rm = TRUE))
             " (all starts within tolerance — line omitted from plot)."
@@ -1041,9 +1040,8 @@ lmest_parallel <- function(
   The iteration count and timing (points 2–3) have no equivalent field in the 
   current model object and would require LMest to expose them explicitly -- for 
   example as `$iter_per_start` and `$time_per_start`. Naming the entries of 
-  `$lktrace` (e.g. `list(deterministic = lk0, random = c(...), refined = lkN)`) 
-  rather than  returning a positional vector would also remove the structural 
-  assumption that both `lmestSearch_plot()` as I suggested above in the search plot section. 
+  `$lktrace` (e.g. `list(random = c(...))`) populated from inside `lmcovlatent`
+  and its siblings, matching what `lmestSearch()` already does for its own lktrace.
 
 - **Memory:** each worker returns its full `lmest` model object, so `all_results`
   holds `n_reps` models in memory simultaneously. For large datasets this can be
