@@ -1,7 +1,7 @@
 Custom Lmest Functions
 ================
 Diego Vitali
-08 April, 2026
+09 April, 2026
 
 - [Introduction](#introduction)
 - [Plotting function for
@@ -44,8 +44,8 @@ consistent with existing LMest conventions.
 
 - `lmestSearch_plot()` — complements `lmestSearch()` by plotting the
   distribution of log-likelihood differences across random starts,
-  providing a visual and quantitative assessment of whether `nrep` is
-  large enough to reliably reach the global maximum.
+  providing a visual and quantitative assessment of LL surface, and
+  insight into the assess `nrep`.
 
 - `get_observed_InitialStates_counts()` — returns the observed count of
   subjects assigned to each latent state at baseline via global
@@ -68,7 +68,7 @@ consistent with existing LMest conventions.
 
 - `lmest_parallel()` — wraps `lmest()` in a `future_lapply()` call to
   distribute independent random-start replications across parallel
-  workers, selecting the best model by log-likelihood and reporting a
+  workers, selecting the best model by log-likelihood, and reporting a
   stability summary across workers.
 
 ------------------------------------------------------------------------
@@ -130,9 +130,9 @@ lmestSearhc function progresses as follow:
     longitudinal latent class modeling for its stronger penalty on model
     complexity, as per the recommendations in the literature.
 
-Therefore here I aim to:
+Therefore here we take the example where we aim to:
 
-1.  explore what is a reasonbly large number of tries
+1.  explore what is a reasonbly large number of tries (random starts)
 2.  look at both lk and AIC/BIC to determine the optimal $k$
 
 ``` r
@@ -218,7 +218,7 @@ become more robust – e.g. list(deterministic = .. ; random = …; refined
 = …).**
 
 ``` r
-# lktrace: all convergence ll
+# lktrace: all convergence ll are recorded under %lktrace
 Lmest_search_out$out.single[[3]]$lktrace
 ```
 
@@ -230,24 +230,25 @@ Lmest_search_out$out.single[[3]]$lktrace
     ## [36] -6857.404 -6847.554 -6860.595 -6856.700 -6849.649 -6850.703 -6835.334
 
 ``` r
-# how many runs, in this case (start = 1) and k = [3] we have 40 random starts: 20 * (3-1) 
-length(Lmest_search_out$out.single[[3]]$lktrace)
+# how many runs, in this case (start = 1) and k = [3] we have 40 random starts (20 * (3-1)) + 2 deterministic runs
+#length(Lmest_search_out$out.single[[3]]$lktrace) # gives 40+2 = 42
 ```
-
-    ## [1] 42
 
 **BUT how many random starts is enough ?**
 
 In the case of PSIDlong the reponse model is not very complex, but if we
 have a complex response model it maybe difficult to confidently chose a
-adequate number of random starts. The aim of this plot function is
-compliment lmestsearch and help me evaluate the number of random starts
-used: is *nrep* large enough to adequately explore the parameter space?
-is *nrep* large enough to reach a convergence ll parameter that is
-unlikely smaller than the global maximum - up to a negligeable tolerance
-level.
+adequate number of random starts. The aim of this plot function is to be
+a compliment of lmestsearch, and to help the user evaluate the number of
+random starts used:
 
-In order to help supporting this process I set up *lmestSearch_plot()*
+- is *nrep* large enough to adequately explore the parameter space?
+- is *nrep* large enough to reach a convergence ll parameter that is
+  unlikely smaller than the global maximum - up to a negligeable
+  tolerance level.
+
+In order to help supporting this exploration process I set up
+*lmestSearch_plot()*
 
 ## What lmestSearch_plot() adds to lmestsearch()
 
@@ -319,7 +320,10 @@ lmestSearch_plot <- function(all_lks, k = 4, k_multiplier = 3, plot_hist = TRUE)
   df_filtered <- data.frame(diffs = filtered_diffs, type = "Filtered")
   
   if(plot_hist){
-    refinement_diff <- abs_best_lk - max_lk  # > 0 if refinement improved on best random start
+    # start=2 uses the best run's *converged* parameters as initial values (not the
+    # original random seed), so refinement_diff > 0 means the EM travelled further
+    # from an already-converged solution — a large gap flags incomplete convergence.
+    refinement_diff <- abs_best_lk - max_lk
     refine_label <- sprintf("Red dashed: start=2 refinement LL=%.4f (%+.4f vs best random start)",
                             abs_best_lk, refinement_diff)
 
@@ -363,81 +367,55 @@ lmestSearch_plot <- function(all_lks, k = 4, k_multiplier = 3, plot_hist = TRUE)
 
 In this example we examine the random starts for k = 2,3,4,5
 
-``` r
-state2_llDiffs<-lmestSearch_plot(Lmest_search_out$out.single,k = 2, k_multiplier = 3, plot_hist = TRUE)
-```
-
-![](Lmest_added_functions_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
-
-``` r
-state3_llDiffs<-lmestSearch_plot(Lmest_search_out$out.single,k = 3, k_multiplier = 3, plot_hist = TRUE)
-```
-
-![](Lmest_added_functions_files/figure-gfm/unnamed-chunk-6-2.png)<!-- -->
-
-``` r
-state4_llDiffs<-lmestSearch_plot(Lmest_search_out$out.single,k = 4, k_multiplier = 3, plot_hist = TRUE)
-```
-
-![](Lmest_added_functions_files/figure-gfm/unnamed-chunk-6-3.png)<!-- -->
-
-``` r
-state5_llDiffs<-lmestSearch_plot(Lmest_search_out$out.single,k = 5, k_multiplier = 3, plot_hist = TRUE)
-```
-
-![](Lmest_added_functions_files/figure-gfm/unnamed-chunk-6-4.png)<!-- -->
-
-``` r
-cat("Median absolute diff near max for state 2:", abs(state2_llDiffs$median_diff), "\n")
-```
+![](Lmest_added_functions_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->![](Lmest_added_functions_files/figure-gfm/unnamed-chunk-6-2.png)<!-- -->![](Lmest_added_functions_files/figure-gfm/unnamed-chunk-6-3.png)<!-- -->![](Lmest_added_functions_files/figure-gfm/unnamed-chunk-6-4.png)<!-- -->
 
     ## Median absolute diff near max for state 2: 0.03848589
 
-``` r
-cat("Median absolute diff near max for state 3:", abs(state3_llDiffs$median_diff), "\n")
-```
-
     ## Median absolute diff near max for state 3: 16.51135
-
-``` r
-cat("Median absolute diff near max for state 4:", abs(state4_llDiffs$median_diff), "\n")
-```
 
     ## Median absolute diff near max for state 4: 20.78472
 
-``` r
-cat("Median absolute diff near max for state 5:", abs(state5_llDiffs$median_diff), "\n")
-```
-
     ## Median absolute diff near max for state 5: 15.09641
 
-The plots complement the output of lmestSearch() and allow to evaluate
-the stability of the estimate, they expose multimodality of the
-log-likelihood surface and they provide valuable insight on both the
-stability of the convergence at each k state, and the complexity of the
-parameter space.
+The plots complement the output of lmestSearch() and allow to:
+
+- evaluate the stability of the estimate
+- expose multimodality of the log-likelihood surface
+
+Overall they provide valuable insight on both *the stability of the
+convergence* at each k state, and *the complexity of the parameter
+space*.
 
 Blue and red dotted lines. The refinement run (start=2) re-runs the EM
 from the best random start’s parameter that was found at convergence.
 This means that the refinement run can only improve using as starting
 point the best model found via random starts. A large difference between
 red (refinement fit ) and blue dashed lines (random start best fit)
-suggests either (a) maxit is too low and the random starts aren’t
-converging fully, or (b) the random start happened to land near a good
-basin but more iterations were needed to climb it. Although finding no
-difference between refinement and random start does not represent a
-validation criterion, finding a large improvement between random and
-refinement run should flag our attention.
+shows that the best random fit was likely a local maxima. Although
+finding no difference between refinement fit and best random start fit
+does not represent a single validation criterion for `K`, `nrep`, or
+`maxit`, finding a large improvement with the refinement run should flag
+careful attention.
 
 # LMest() output handlers, basic gatekeeping and diagnostics
 
 I propose here some tools that can facilitate some aspects of working
 with lmest():
 
-- get_observed_InitialStates_counts()
-- get_observed_transition_counts()
-- initial_prob_Diagnostics()
-- transition_Diagnostics_multilogit()
+- `get_observed_InitialStates_counts()`: decodes the model’s state
+  assignments and returns observed counts of subjects in each state at
+  the first time point
+- `get_observed_transition_counts()`: decodes state sequences and counts
+  observed transitions between states across all time pairs, either
+  globally or by transition pair.
+- `initial_prob_Diagnostics()`: extracts and formats the multinomial
+  logit coefficients (with SEs, CIs, EPV) for the initial state
+  probability model (Piv regressors), with optional significance
+  flagging.  
+- `transition_Diagnostics_multilogit()`: extracts and formats the
+  multinomial logit coefficients (with SEs, CIs, EPV) for the transition
+  probability model from a specified start state (Pi regressors),
+  covering all destination states.
 
 ``` r
 mod2 <- lmest(responsesFormula = fmLatent$responsesFormula,
@@ -559,7 +537,8 @@ base for diagnostics. *Please advise if this assumption is wrong.*
 ``` r
 N_obs_states<-get_observed_InitialStates_counts(mod2)
 
-N_obs_states %>% kable(col.names = c("","count"), caption = "Count of respondents by each allocated latent state at baseline")
+N_obs_states %>% kable(col.names = c("","count"), 
+                       caption = "Count of respondents by each allocated latent state at baseline")
 ```
 
 |         | count |
@@ -624,13 +603,14 @@ Nobs_trans<-get_observed_transition_counts(mod2, option = "global")
 
 ``` r
 # Global decoding gives a robust and realistic count of transitions that can be helpful for diagnostic purposes
-print(Nobs_trans)# %>% addmargins())
+Nobs_trans %>% kable # %>% addmargins())
 ```
 
-    ##              To State 1 To State 2 To State 3
-    ## From State 1       2360        327          2
-    ## From State 2        159       5049        341
-    ## From State 3         97        330         11
+|              | To State 1 | To State 2 | To State 3 |
+|:-------------|-----------:|-----------:|-----------:|
+| From State 1 |       2360 |        327 |          2 |
+| From State 2 |        159 |       5049 |        341 |
+| From State 3 |         97 |        330 |         11 |
 
 ## initial_prob_Diagnostics()
 
@@ -815,8 +795,8 @@ initial_States_summary<- initial_prob_Diagnostics(
    conf_level = 0.95
    
  )
-initial_States_summary %>% 
-  arrange(Sep_Flag,varname,State) %>% kable
+initial_States_summary %>%
+  arrange(Sep_Flag,varname,State) %>% kable()
 ```
 
 | varname | State | Ref_state | N_obs_states | Coefficient | StdError | t_value | CI_lower | CI_upper | EPV | Sep_Flag | Signif | Comment |
@@ -1026,7 +1006,7 @@ summary_table %>% filter(EPV >= 20) %>% kable
 | X9Income | 3 -\> 2 | 330 | -0.006 | 0.020 | -0.29 | -0.045 | 0.033 | 66.0 | OK |  | n.s |
 
 ``` r
-summary_table %>% filter(EPV < 20) %>% kable
+summary_table %>% filter(EPV < 20) %>% kable 
 ```
 
 | varname | Transition | N_obs_trans | Coefficient | StdError | t_value | CI_lower | CI_upper | EPV | Sep_Flag | Signif | Comment |
@@ -1137,8 +1117,8 @@ there are also multiple less well-fitting solutions at different local
 maxima LL. Part of the exploratory nature of finite mixture models is
 running each K+1 class model with multiple random starts so that each
 model run includes multiple model solutions with their LL reported in
-the output (Moore et al., 2025,
-<https://onlinelibrary.wiley.com/doi/full/10.1002/ijop.70021>).
+the output \[Moore et al.,
+2025\]\[<https://onlinelibrary.wiley.com/doi/full/10.1002/ijop.70021>\].
 
 Well aware of this, `lmest()` already supports multiple random starts
 via `ntry` and `start = 1`. However, because the internal EM loop is
@@ -1186,11 +1166,11 @@ provides evidence of proximity to the global maximum.
 and `n_workers = 4`:
 
 - 3 sequential batches, each running 4 workers in parallel
-- total wall time ≈ time of one `lmest()` call × 3 batches (plus
+- total wall time ~ time of one `lmest()` call × 3 batches (plus
   overhead)
 - total random starts = 12 × `ntry`
 
-With `n_reps ≤ n_workers` all replications run in a single batch.
+With `n_reps <= n_workers` all replications run in a single batch.
 
 ### Return value
 
@@ -1302,14 +1282,13 @@ lmest_parallel <- function(
                     n_reps - n_valid))
 
   # --- Aggregate per-start LLs from lktrace across all workers ---
-  # lktrace is a positional vector: [deterministic, random_1...random_n, refined]
-  # Trim first and last entries to keep only random starts,
-  # matching the same assumption made in lmestSearch_plot().
-  # NOTE: if LMest exposed lktrace as a named list this trim would not be needed.
+  # lmest() does not populate $lktrace — it is always NULL (lktrace is only
+  # set by lmestSearch()). This block is forward-looking: it will produce
+  # results once lmest exposes per-start LLs from lmcovlatent (and siblings).
   all_lls <- unlist(lapply(all_results, function(x) {
     tr <- x$model$lktrace
-    if (is.null(tr) || length(tr) <= 2) return(NULL)
-    tr[2:(length(tr) - 1)]
+    if (is.null(tr) || length(tr) == 0) return(NULL)
+    tr
   }))
 
   best_lk_all  <- max(all_lls, na.rm = TRUE)
@@ -1346,10 +1325,7 @@ lmest_parallel <- function(
         y       = "Count",
         caption = sprintf(
           paste0("Green solid line: best random start LL = %.4f.\n",
-                 "Stability tolerance: %.0f LL units",
-                 "%s\n",
-                 "Random starts only — deterministic and refinement starts",
-                 " excluded via lktrace[2:(n-1)]."),
+                 "Stability tolerance: %.0f LL units%s"),
           best_lk_all, stability_tol,
           if (-stability_tol <= min(all_diffs, na.rm = TRUE))
             " (all starts within tolerance — line omitted from plot)."
@@ -1382,34 +1358,27 @@ lmest_parallel <- function(
 - **What this sketch omits relative to a fuller implementation:** in the
   analysis reported in tmy paper, I extended this sketch using
   `capture.output()` around each `lmest()` call (run with
-  `output = TRUE`) to parse three quantities from the printed EM trace:
+  `output = TRUE`) to parse two quantities that (currently) we can
+  capture from the printed EM trace:
 
-  1.  the final LL of each individual random start, enabling a per-start
-      LL histogram analogous to `lmestSearch_plot()`;
+  1.  the final LL of each individual random start, enabling a
+      **per-start LL histogram** analogous to `lmestSearch_plot()`;
   2.  the number of EM iterations each start required before convergence
       (`final_step`) – a start converging in 8 iterations versus 9800 is
       diagnostically informative;
-  3.  wall time per start. Using capture.output was fine for running my
-      pipeline once but obviously it is fragile because it relies on the
-      exact string format of LMest’s internal `cat()` calls and it would
-      break silently if that format changed.
 
-  The iteration count and timing (points 2–3) have no equivalent field
-  in the current model object and would require LMest to expose them
-  explicitly – for example as `$iter_per_start` and `$time_per_start`.
-  Naming the entries of `$lktrace`
-  (e.g. `list(deterministic = lk0, random = c(...), refined = lkN)`)
-  rather than returning a positional vector would also remove the
-  structural assumption that both `lmestSearch_plot()` as I suggested
-  above in the search plot section.
+Using capture.output was fine for me running my pipeline in this case
+but obviously capturing output is fragile because it relies on the exact
+string format of LMest’s internal `cat()` calls and it would break
+without warning if next lmest releases change that output format.
 
-- **Memory:** each worker returns its full `lmest` model object, so
-  `all_results` holds `n_reps` models in memory simultaneously. For
-  large datasets this can be substantial (e.g. ~150 MB per model × 24
-  workers ≈ 3.5 GB). A leaner implementation would have workers return
-  only `lk` and `lktrace` and recover the best model with a single refit
-  using the winning seed:
-  `lmest(..., seed = best_seed, ntry = ntry, start = 1)`.
+For the **per-start LL histogram**, lmest would only needs to expose
+`$start_lks` as a vector of length ntry × k recording the converged LL
+of each random start from inside lmcovlatent. `$lk` (the post-refinement
+LL) already exists. *Iteration counts* and *wall time per start* are
+additional (nice to have) diagnostics that would require further fields.
+
+Additional details:
 
 - **Seed reproducibility:** each worker receives
   `seed = base_seed + rep_id`, making runs fully reproducible given the
@@ -1422,6 +1391,16 @@ lmest_parallel <- function(
 - **`on.exit(plan(sequential))`** ensures the parallel backend is torn
   down even if the function exits with an error, avoiding leaked worker
   processes.
+
+One concern for some systems is to do with memory: in future() each
+worker returns its full `lmest` model object, so `all_results` holds
+`n_reps` models in memory simultaneously. Future() does not write tmp
+files. This means that memory usage will increase linearly and converge
+to nrep\*model_size - e.g if we have 150 MB per model and 24 reps we
+will need 3.6 GB of RAM to complete the future() routine. This means
+that there is an non-neglegible OOM risk. I did not have this issue with
+my analysis but I suppose one way to mitigate this could be to write to
+disk the full model objects of each batch run.
 
 ## Example usage
 
